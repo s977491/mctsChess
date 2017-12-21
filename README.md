@@ -9,5 +9,5 @@ After make all, run
   
   currently, in fact the threadpool is not useful.
   
-  NOTE: now it is restricted to use 3-4 g memory.
+  NOTE: now it is restricted to use 3-4 g memory. soon it can be configurable.
   
