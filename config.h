@@ -36,16 +36,33 @@ public:
 		poolSize = value;
 	}
 
+	int getMaxCheckmateTimes() {
+		return maxCheckmateTimes;
+	}
+	void setMaxCheckmateTimes(int value) {
+		maxCheckmateTimes = value;
+	}
+
+	int getHumanSide() {
+		return humanSide;
+	}
+	void setHumanSide(int value) {
+		humanSide = value;
+	}
+
 	ThreadPool& getPool() {
-		static ThreadPool instance(poolSize);
+		static ThreadPool instance(0);
 		return instance;
 	}
 
 private:
 	Config() {}
-	int searchTimes = 1000;
-	int cPUCT = 250;
-	int poolSize = 2;
+	int searchTimes = 600000;
+	int cPUCT = 1000;
+	int poolSize = 23000000;
+	int humanSide = 1;
+	int maxCheckmateTimes = 3;
+//	int nodeSize = 23000000
 
 	//unique_ptr<ThreadPool> pPool;
 };

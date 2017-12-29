@@ -36,6 +36,8 @@ void defaultConfiger(int argc, const char* argv[], int index, const char* title,
 int main(int argc, const char* argv[]) {
 
 	// enqueue and store future
+	cout << "processor [searchTimes] [cPUST*100] [MemPoolSize]" <<endl;
+	cout << "for 5Gram, suggested params: 600000 1000 23000000" << endl;
 	cout << "Thread concurrency:" << std::thread::hardware_concurrency() << endl;
 //	thread t1([] {svc.run();});
 	//std::bind(&boost::asio::io_service::run, &svc)));
@@ -52,15 +54,20 @@ int main(int argc, const char* argv[]) {
 					[](int value) { Config::getInstance().setCPUCT(value); });
 
 	defaultConfiger(argc, argv, 3, "poolsize",
-					[]() { return Config::getInstance().getPoolSize(); } ,
-					[](int value) { Config::getInstance().setPoolSize(value); });
+						[]() { return Config::getInstance().getPoolSize(); } ,
+						[](int value) { Config::getInstance().setPoolSize(value); });
+
+	defaultConfiger(argc, argv, 4, "humanSide",
+						[]() { return Config::getInstance().getHumanSide(); } ,
+						[](int value) { Config::getInstance().setHumanSide(value); });
+
 
 	cout << "thread actual size: " << Config::getInstance().getPool().getSize() << endl;
 
 	Chess chess;
 	Chess qChess;
 	chess.init(board);
-	auto rootNode = MCTSNode::rootNode(chess, 1);
+	auto rootNode = MCTSNode::rootNode(chess, 1, 0, 0, -1, -1);
 	MCTSNode* curRoot = rootNode;
 	MCTS trainer;
 	string cmd = "";
@@ -70,23 +77,32 @@ int main(int argc, const char* argv[]) {
 	int humanFlag = 1;
 	MCTSNode* qNode;
 	bool print = true;
+	qChess = rootChess;
 	while (cmd != "q") {
-		Move mov;
-		qChess = rootChess;
+
 		if (!suggested) {
-			cout << "size running at  " << PoolMgr::getInstance().size() <<endl;
-			mov = trainer.suggestMove(curRoot, humanFlag != side);
+			vector<Move> movVector = trainer.suggestMove(curRoot, humanFlag != side);
+			cout << "fired checkmate " << curRoot->firedCheckMateCnt << endl;
+			cout << rootChess.getPieceString(curRoot->firedAttackerId, true) << endl;
+			cout << "being checkmated " << curRoot->beingCheckMatedCnt << endl;
+			cout << rootChess.getPieceString(curRoot->beingAttackerId, true) << endl;
 			cout << "size running at  " << PoolMgr::getInstance().size() <<endl;
 
 			if (humanFlag != side)
+				for (auto& mov : movVector)
 				cout << "computer suggest mov: " << mov.toString() << endl;
 			else {
 				cout << "your turn!" << endl;
 			}
 			suggested = true;
 			qNode = curRoot;
+			qChess = rootChess;
+
 			if (print)
 				qNode->printChildrenSummary();
+		}
+		if (curRoot->firedCheckMateCnt >= Config::getInstance().getMaxCheckmateTimes()) {
+			cout << "Cannot checkmate as already done " <<  Config::getInstance().getMaxCheckmateTimes() << " times for the same piece" << endl;
 		}
 		cin >> cmd;
 		if (cmd.length() == 4) {
@@ -101,11 +117,30 @@ int main(int argc, const char* argv[]) {
 					trainer.treeSearch(curRoot);
 				curRoot->moved = true;
 				chess.apply(curRoot->move);
+				chess.flip();
+				int firedCheckMateCnt = 0;
+				int beingCheckMatedCnt = 0;
+				int firedAttackerId = -1;
+				int beingAttackerId = -1;
+
+				if (chess.isCheckmated(beingAttackerId)) {
+					beingCheckMatedCnt = 1;
+					if (curRoot->parent->firedAttackerId == beingAttackerId) {
+						beingCheckMatedCnt += curRoot->parent->firedCheckMateCnt;
+					}
+				}
+				else {
+					beingCheckMatedCnt = 0;
+				}
+				firedCheckMateCnt = curRoot->parent->beingCheckMatedCnt;
+				firedAttackerId =  curRoot->parent->beingAttackerId;
+
 				cout << chess.toString() << endl;
 				side = -side;
-				PoolMgr::getInstance().free();
 
-				curRoot = MCTSNode::rootNode(chess, side);
+				PoolMgr::getInstance().free();
+				curRoot = MCTSNode::rootNode(chess, side, beingCheckMatedCnt, firedCheckMateCnt, beingAttackerId, firedAttackerId);
+
 				cout << "after erase size running at  " << PoolMgr::getInstance().size() <<endl;
 
 			}
@@ -116,13 +151,14 @@ int main(int argc, const char* argv[]) {
 		else if (cmd.length() > 4) {
 			tupleKey_t cmdNode = make_tuple(cmd[0] - '0', cmd[1] - '0', cmd[2] - '0', cmd[3] - '0');
 			if (cmd[4] == 'g') {
-				auto iter = curRoot->findChild(cmd[0] - '0', cmd[1] - '0', cmd[2] - '0', cmd[3] - '0');
+				auto iter = qNode->findChild(cmd[0] - '0', cmd[1] - '0', cmd[2] - '0', cmd[3] - '0');
 				if (iter != nullptr) {
 					qNode = iter;
 					qNode->printChildrenSummary();
 					qChess.apply(qNode->move);
 					qChess.flip();
-
+				} else {
+					cout << "not found" << endl;
 				}
 			}
 		}

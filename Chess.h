@@ -4,7 +4,7 @@
 
 #include <iostream>
 #include <math.h>
-#include <vector>
+#include <deque>
 #include <sstream>
 #include <list>
 #include <algorithm>
@@ -39,7 +39,7 @@ typedef array<array<char, 9>, 10> board_t;
 #define invalid -100000000
 //int PieceScore[] = { 0, 100000, 10000, 4800, 5200, 1500, 1500, 500 };
 int PieceScore[] = { 0, 100000, 10000, 4800, 5200, 2500, 2500, 500 };
-const int ppbonus = 2000;
+const int ppbonus = 750;
 const int bonusUnit = 50;
 class Piece;
 class Move {
@@ -107,8 +107,8 @@ public:
 	void init(board_t& _board)
 	{
 		board = _board;
-		posList.reserve(16);
-		negList.reserve(16);
+		//posList.reserve(16);
+		//negList.reserve(16);
 		posList.clear();
 		negList.clear();
 		score = 0;
@@ -154,10 +154,17 @@ public:
 				}
 				score += PieceScore[v] * sign;
 				if (sign > 0) {
-					posList.push_back(Piece(i, j, piece));
+					if (v == pk)
+						posList.push_front(Piece(i, j, piece));
+					else
+						posList.push_back(Piece(i, j, piece));
+
 				}
 				else {
-					negList.push_back(Piece(i, j, piece));
+					if (v == pk)
+						negList.push_front(Piece(i, j, piece));
+					else
+						negList.push_back(Piece(i, j, piece));
 				}
 			}
 		}
@@ -178,6 +185,16 @@ public:
 			//			cout << piece.piece  << " bonus:-" << bonus << " " << score << endl;
 		}
 		valid = true;
+	}
+	string getPieceString(int pieceId, bool positiveList) {
+		if (pieceId <0)
+			return "";
+		if (positiveList) {
+			return posList[pieceId].toString();
+		}
+		else {
+			return negList[pieceId].toString();
+		}
 	}
 	void recalBaseScore() {
 		score = 0;
@@ -229,7 +246,7 @@ public:
 			}
 			return bonus;
 		case pp:
-			if (yDeta > 4) {
+			if (yDeta > 5) {
 				if (yDeta < 8)
 					return ppbonus;
 				//				if (yDeta == 8)
@@ -253,50 +270,53 @@ public:
 					}
 				}
 			}
-			if (movCount <3) {
-
-				bonus = (movCount - 3);
-				bonus = bonus * bonusUnit ;
+			if (movCount == 0) {
+				bonus = - 4 *bonusUnit ;
+//				bonus = (movCount - 3);
+//				bonus = bonus * bonusUnit ;
 			}
 			//bonus -= (totalPieces-16) * bonusUnit ;
 			if (yDeta != 0 || xDeta != 3)
-				bonus += 2 * bonusUnit;
+				bonus += 4 * bonusUnit;
 			return bonus;
 		case pr:
 		{
 			int bonus = 0;
-			/*if (yDeta != 0 || xDeta != 4)
-				bonus =  5 * bonusUnit;*/
-
-			list<Move> ret;
-			addMoves(piece, ret);
-			//cout << "pr: " << ret.size() <<  "," << piece.piece << endl;
-			if (ret.size() <= 3) {
-				for (auto& mov : ret) {
-					//					cout << mov.toString() <<  endl;
-					if (board[mov.y2][mov.x2] * piece.piece < 0)
-						return 0;
-				}
-				return bonus +-5 * bonusUnit;
-			}
+			if (xDeta != 4)
+				bonus +=  4 * bonusUnit;
+			if (yDeta > 0)
+				bonus +=  4 * bonusUnit;
+//
+//			list<Move> ret;
+//			addMoves(piece, ret);
+//			//cout << "pr: " << ret.size() <<  "," << piece.piece << endl;
+//			if (ret.size() <= 3) {
+//				for (auto& mov : ret) {
+//					//					cout << mov.toString() <<  endl;
+//					if (board[mov.y2][mov.x2] * piece.piece < 0)
+//						return 0;
+//				}
+//				return bonus +-5 * bonusUnit;
+//			}
 			return bonus;
 			break;
 		}
 		case pc:
-			list<Move> ret;
-			addMoves(piece, ret);
-			bool diffX = false;
-			bool diffY = false;
-			for (auto& mov : ret) {
-				if (mov.x2 != piece.x)
-					diffX = true;
-				if (mov.y2 != piece.y)
-					diffY = true;
-				if (diffX && diffY)
-					break;
-			}
-			if (!diffX || !diffY)
-				return -bonusUnit * 10;
+//			list<Move> ret;
+//			addMoves(piece, ret);
+//			bool diffX = false;
+//			bool diffY = false;
+//			for (auto& mov : ret) {
+//				if (mov.x2 != piece.x)
+//					diffX = true;
+//				if (mov.y2 != piece.y)
+//					diffY = true;
+//				if (diffX && diffY)
+//					break;
+//			}
+//			if (!diffX || !diffY)
+//				return -bonusUnit * 10;
+			return 0;
 			//return (9-yDeta)*bonusUnit + (totalPieces-16) * bonusUnit/3;
 		}
 
@@ -406,14 +426,8 @@ public:
 		}
 		return true;
 	}
-	int getPieceScore(int y, int x, int piece, vector<Piece>* pieceSideList) {
-		Piece* pMyKingPiece = nullptr;
-		for (Piece p : (*pieceSideList)) {
-			if (abs(p.piece) == pk) {
-				pMyKingPiece = &p;
-				break;
-			}
-		}
+	int getPieceScore(int y, int x, int piece, deque<Piece>* pieceSideList) {
+		Piece* pMyKingPiece = &(pieceSideList->front());
 		int scoreChange = PieceScore[abs(piece)];
 		if (abs(piece) == pp) { //crossed river has more power unless at the bottom
 			if (pMyKingPiece->y > 5 && y > 4 && y < 9) {
@@ -435,6 +449,81 @@ public:
 			addMoves(piece, ret); //caled the score inside the move
 		}
 		return ret;
+	}
+	inline bool isCheckmated(int& attackerId) {
+		list<Move> ret;
+		Piece& king = posList.front();
+		if (king.dead)
+			return false;
+
+		int i = 0;
+		for (auto& piece : negList) {
+			if (piece.dead) continue;
+			if (isReasonableKill(piece.piece, piece.y, piece.x, king.y, king.x)) {
+				attackerId = i;
+				return true;
+			}
+			++i;
+		}
+		return false;
+	}
+	inline bool isReasonableKill(int piece, int fromY, int fromX, int toY, int toX) {
+		int src = abs(piece);
+		if (src == pa || src == pe)
+			return false;
+		int ydiff = abs(fromY - toY);
+		int xdiff = abs(fromX - toX);
+		int obs = 0;
+
+		switch (src){
+		case pp:
+			if (xdiff + ydiff == 1) {
+				return true;
+			}
+			break;
+		case ph:
+			if (xdiff + ydiff == 3 && xdiff > 0 && ydiff > 0) {
+				if (xdiff == 2 && board[fromY][(fromX+toX)/2] == 0) {
+					return true;
+				}
+				if (ydiff == 2 && board[(fromY+toY)/2][fromX] == 0) {
+					return true;
+				}
+			}
+			break;
+		case pc:
+		case pr:
+		case pk:
+			 if (src == pc)
+				 obs = 1;
+
+			 if (xdiff == 0) {
+				 int sign = -1;
+				 if (toY > fromY)
+					 sign = 1;
+				 for ( int i = fromY + sign; i != toY; i += sign) {
+					 if (board[i][fromX] != 0)
+						 --obs;
+				 }
+				 if (obs == 0)
+					 return true;
+				 return false;
+			 }
+			 if (ydiff == 0) {
+				 int sign = -1;
+				 if (toX > fromX)
+					 sign = 1;
+				 for ( int i = fromX + sign; i != toX; i += sign) {
+					 if (board[fromY][i] != 0)
+						 --obs;
+				 }
+				 if (obs == 0)
+					 return true;
+				 return false;
+			 }
+			break;
+		}
+		return false;
 	}
 	bool getWinMove(Move& winMove) {
 		return getWinMove(getPossibleMove(), winMove);
@@ -875,7 +964,8 @@ public:
 
 	string toString() {
 		ostringstream oss;
-		for (int i = 0; i < 10; ++i) {
+		for (int i = 9; i >=0; --i) {
+			oss << (i ) << ":";
 			for (int j = 0; j < 9; ++j) {
 				int v = abs(board[i][j]);
 				char piece = ' ';
@@ -917,6 +1007,12 @@ public:
 			}
 			oss << endl;
 		}
+		oss << "  ";
+		for (int j = 0; j < 9; ++j){
+			oss << (j ) << " ";
+		}
+		oss << endl;
+
 		/*oss << "posList:" << endl;
 		for (auto ppp : posList) {
 			oss << ppp.toString() << endl;
@@ -936,8 +1032,8 @@ private:
 	//vector< vector<int>  >& board;
 	//unique_ptr<vector< vector<int>  > > pBoard;
 	board_t board;
-	vector<Piece> posList;
-	vector<Piece> negList;
+	deque<Piece> posList;
+	deque<Piece> negList;
 };
 
 #endif /* CHESS_H_ */

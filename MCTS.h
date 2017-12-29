@@ -20,6 +20,8 @@
 #include "latencytimer.h"
 #include "config.h"
 #include <boost/pool/object_pool.hpp>
+#include <cstdlib>
+#include <ctime>
 
 const double DefaultProb = 0.01;
 using namespace std;
@@ -145,7 +147,7 @@ class MCTSNode;
 class PoolMgr {
 public:
 	static PoolMgr& getInstance() {
-		static PoolMgr inst(10000000);
+		static PoolMgr inst;
 		return inst;
 	}
 
@@ -167,7 +169,7 @@ public:
 		nextIndex = 0;
 	}
 private:
-	PoolMgr(int size);
+	PoolMgr();
 	vector<MCTSNode> vPool;
 	size_t nextIndex = 0;
 	//SharedPool<MCTSNode> pool;
@@ -181,15 +183,19 @@ public:
 	//typedef unordered_map<tupleKey_t, MCTSNode*, key_hash, key_equal> nodeMap_t;
 	typedef list< MCTSNode*> nodeMap_t;
 
-	static MCTSNode* rootNode(Chess& chess, int side) {
+	static MCTSNode* rootNode(Chess& chess, int side, int beingCheckMatedCnt, int firedCheckMateCnt, int beingAttackerId, int firedAttackerId) {
 		auto pRetNode = PoolMgr::getInstance().acquire();
 		pRetNode->init(nullptr, Move(), 0);
 
 		rootChess = chess;
-		rootChess.init();
-		if (side == -1)
-			rootChess.flip();
-
+		//rootChess.init();
+		rootChess.recalBaseScore();
+//		if (side == -1)
+//			rootChess.flip();
+		pRetNode->beingCheckMatedCnt = beingCheckMatedCnt;
+		pRetNode->firedCheckMateCnt = firedCheckMateCnt;
+		pRetNode->beingAttackerId = beingAttackerId;
+		pRetNode->firedAttackerId = firedAttackerId;
 		curChess = rootChess;
 		cout << "score:" <<rootChess.score << endl;
 		//auto ret = Chess::getCalValue(rootChess);
@@ -215,8 +221,14 @@ public:
 	MCTSNode* parent;
 	Move move;
 	double prior;
+
+	int beingCheckMatedCnt;
+	int firedCheckMateCnt;
+	int beingAttackerId;
+	int firedAttackerId;
 private:
 	double c_PUCT;
+
 public:
 	MCTSNode()
 		: c_PUCT(Config::getInstance().getCPUCT()/100.0)
@@ -249,22 +261,49 @@ public:
 		moved = false;
 		done = Playing;
 		children.clear();
+		beingCheckMatedCnt = 0;
+		firedCheckMateCnt = 0;
+		firedAttackerId = -1;
+		beingAttackerId = -1;
 	}
 
 
 	ChessResult expand(Move* pFocusMove, double focusProb) {
 		expanded = true;
 		ChessResult won = Won;
+
+
 		list<Move> moveList;
 		{
-			auto timerInstance = TimerFactory::getInstance().createTimerInstance("getPossibleMove");
+//			auto timerInstance = TimerFactory::getInstance().createTimerInstance("getPossibleMove");
 			moveList = curChess.getPossibleMove();
 		}
 		Move winMove;
 		{
-			auto timerInstance = TimerFactory::getInstance().createTimerInstance("getWinMove");
+//			auto timerInstance = TimerFactory::getInstance().createTimerInstance("getWinMove");
 			if (!curChess.getWinMove(moveList, winMove)) {
 				won = Playing;
+				if (firedCheckMateCnt >=  Config::getInstance().getMaxCheckmateTimes()) { //cannot checkmate more than 3 times)
+					//remove all move that result in checkMate
+					auto iter = moveList.begin();
+					while (iter != moveList.end()) {
+						bool needErase = false;
+						curChess.apply(*iter);
+						curChess.flip();
+						int attacker = -1;
+						if (curChess.isCheckmated(attacker)) {
+							if (attacker == firedAttackerId )
+								needErase = true;
+						}
+						curChess.flip();
+						curChess.rollback(*iter);
+
+						if (needErase)
+							moveList.erase(iter++);
+						else
+							++iter;
+					}
+				}
 			}
 			else {
 				moveList.clear();
@@ -272,7 +311,7 @@ public:
 				pFocusMove = nullptr;
 			}
 		}
-		auto timerInstance = TimerFactory::getInstance().createTimerInstance("expand remains");
+//		auto timerInstance = TimerFactory::getInstance().createTimerInstance("expand remains");
 		if (moveList.empty())
 		{
 			won = NoMove;
@@ -297,6 +336,8 @@ public:
 			}
 			auto pChildNode = PoolMgr::getInstance().acquire();
 			pChildNode->init(this, mov, prob);
+			pChildNode->firedCheckMateCnt = this->beingCheckMatedCnt;
+			pChildNode->firedAttackerId = this->beingAttackerId;
 
 			if (won == Won) {
 				pChildNode->done = Won;
@@ -347,17 +388,27 @@ public:
 		}
 		while (cur->isExpanded()) {
 			double maxScore = INT_MIN;
-			MCTSNode* maxPtr = nullptr;
+			vector<MCTSNode*> maxPtrList;
+
 			for (auto& ptr : cur->children) {
 				ptr->calU();
 				double score = ptr->actionScore();
 				if (score > maxScore) {
 					maxScore = score;
-					maxPtr = ptr;
+					maxPtrList.clear();
+					maxPtrList.push_back(ptr);
+				}
+				else if (score == maxScore) {
+					maxPtrList.push_back(ptr);
 				}
 			}
-			if (maxPtr == nullptr ) {
+			if (maxPtrList.empty()) {
 				return cur;
+			}
+			MCTSNode* maxPtr = maxPtrList[0];
+			if (maxPtrList.size() > 1) {
+				int random_variable = std::rand();
+				maxPtr = maxPtrList[random_variable % maxPtrList.size()];
 			}
 			curChess.apply(maxPtr->move);
 			curChess.flip();
@@ -421,7 +472,7 @@ public:
 		};
 		sort(arr.begin(), arr.end(),comp);
 		for (auto& ptr : arr) {
-			cerr << ptr->move.toString() << ", " << ptr->N <<"\t" << ptr->prior << "\t" <<ptr->Q <<"\t" << endl;
+			cerr << ptr->move.toString() << ", " << ptr->N <<"\t" << ptr->prior << "\t" <<ptr->Q <<"\t" <<ptr->beingCheckMatedCnt <<"\t" <<ptr->firedCheckMateCnt <<"\t" << endl;
 		}
 		cerr << endl;
 	}
@@ -431,13 +482,16 @@ class MCTS {
 public:
 	MCTS()
 	{
+		std::srand(std::time(nullptr)); // use current time as seed for random generator
 	}
 	virtual ~MCTS() {}
 
-	Move suggestMove(MCTSNode* root, bool computerTurn) {
+	vector<Move> suggestMove(MCTSNode* root, bool computerTurn) {
+		vector<Move> ret;
 		Move winMov;
 		if (rootChess.getWinMove(winMov)) {
-			return winMov;
+			ret.push_back(winMov);
+			return ret;
 		}
 		int times = 1;
 		if (computerTurn) {
@@ -445,34 +499,58 @@ public:
 		}
 
 		cout << "searching for " << times << endl;
-		for (int i = 0; i < times; ++i) {
-			if (PoolMgr::getInstance().size() < 100)
-			{
-				cout << "size running low  " << PoolMgr::getInstance().size() << " stopping at times: " << i <<endl;
+		{
+			auto timerInstance = TimerFactory::getInstance().createTimerInstance("core Running time");
+			for (int i = 0; i < times; ++i) {
+				if (PoolMgr::getInstance().size() < 100)
+				{
+					cout << "size running low  " << PoolMgr::getInstance().size() << " stopping at times: " << i <<endl;
+					break;
+				}
+				treeSearch(root);
+			}
+		}
+
+		auto childComp = [](const MCTSNode* l, const MCTSNode* r) {
+			return l->N > r->N;
+		};
+
+		root->children.sort(childComp);
+		int numAdvice = 3;
+		if (root->children.size() <= 3) {
+			numAdvice = root->children.size();
+		}
+		vector<Move> retMoves(numAdvice);
+		int i =0;
+		for (auto ptr : root->children) {
+			retMoves[i] = ptr->move;
+			++i;
+			if (i >= numAdvice)
 				break;
-			}
-			treeSearch(root);
 		}
-		int maxN = 0;
-		Move maxMove;
-		for (auto& ptr : root->children) {
-			if (ptr->N > maxN) {
-				maxN = ptr->N;
-				maxMove = ptr->move;
-			}
-		}
+		ret = retMoves;
+//		int maxN = 0;
+//		Move maxMove;
+//		for (auto& ptr : root->children) {
+//			if (ptr->N > maxN) {
+//				maxN = ptr->N;
+//				maxMove = ptr->move;
+//			}
+//		}
+//		ret.push_back(maxMove);
 
 
 		TimerFactory::getInstance().printSummary();
 		TimerFactory::getInstance().clear();
-		return maxMove;
+
+		return ret;
 	}
 
 	void treeSearch(MCTSNode* root) {
 
 		MCTSNode* chosenLeaf;
 		{
-			auto timerInstance = TimerFactory::getInstance().createTimerInstance("selectLeaf");
+//			auto timerInstance = TimerFactory::getInstance().createTimerInstance("selectLeaf");
 			chosenLeaf = root->selectLeaf();
 
 			if (chosenLeaf->done == Won) {
@@ -485,6 +563,19 @@ public:
 				//cerr << "already not playing " << chosenLeaf->done  << endl;
 				return;
 			}
+			//checkmate setting
+			int attackerId = -1;
+			if (curChess.isCheckmated(attackerId)) {
+				chosenLeaf->beingCheckMatedCnt = 1;
+				if (chosenLeaf->parent!= nullptr && chosenLeaf->parent->firedAttackerId == attackerId)
+					chosenLeaf->beingCheckMatedCnt += chosenLeaf->parent->firedCheckMateCnt;
+			}
+			else {
+				chosenLeaf->beingCheckMatedCnt = 0;
+			}
+			chosenLeaf->beingAttackerId = attackerId;
+
+
 			curChess.recalBaseScore();
 			//chosenLeaf->computePosition();
 
@@ -531,8 +622,8 @@ public:
 	}
 };
 
-PoolMgr::PoolMgr(int size) :
-		vPool(size)
+PoolMgr::PoolMgr() :
+		vPool(Config::getInstance().getPoolSize())
 {
 //	for (int i = 0; i < size; ++i) {
 //		pool.add(unique_ptr<MCTSNode>(new MCTSNode()));
